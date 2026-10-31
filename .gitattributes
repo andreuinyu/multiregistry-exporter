@@ -1,0 +1,4 @@
+.git*           export-ignore
+LICENSE         export-ignore
+dependabot.yml   export-ignore
+README.md       export-ignore

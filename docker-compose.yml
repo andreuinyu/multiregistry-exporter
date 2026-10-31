@@ -1,0 +1,17 @@
+services:
+  multiregistry-exporter:
+    container_name: multiregistry-exporter
+    build: .
+    restart: unless-stopped
+    ports:
+      - "9101:9101"
+    environment:
+      IMAGES: |
+        ghcr:linuxserver/sonarr
+        ghcr:linuxserver/radarr
+        dockerhub:jellyfin/jellyfin
+        dockerhub:nginx
+      INTERVAL: "1800"          # seconds between registry polls
+      # GITHUB_TOKEN: ghp_xxx   # optional: adds ghcr version counts
+      # DOCKERHUB_USER: me      # optional: higher Docker Hub rate limits (both needed)
+      # DOCKERHUB_TOKEN: xxx    # optional: higher Docker Hub rate limits (both needed)

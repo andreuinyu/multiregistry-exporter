@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: thursday
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: thursday
+    groups:
+      actions:
+        patterns: ["*"]   # one PR for all action bumps instead of one each
