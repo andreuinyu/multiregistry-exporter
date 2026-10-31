@@ -1,0 +1,24 @@
+name: Release Drafter
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to draft release for'
+        required: true
+
+jobs:
+  update_release_draft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: release-drafter/release-drafter@v7
+        with:
+          tag: ${{ github.event.inputs.tag || github.ref_name }}
+          config-name: release-draft-template.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
