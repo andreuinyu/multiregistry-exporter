@@ -49,8 +49,8 @@ services:
     restart: unless-stopped
     environment:
       IMAGES: |
-        ghcr:linuxserver/radarr
-        dockerhub:jellyfin/jellyfin
+        ghcr:andreuinyu/multiregistry-exporter
+        dockerhub:andreuinyu/multiregistry-exporter
         dockerhub:nginx
         <registry>:<owner>/<image>
 ```
@@ -74,8 +74,8 @@ services:
       - "<your port of choice>:9101"
     environment:
       IMAGES: |
-        ghcr:linuxserver/radarr
-        dockerhub:jellyfin/jellyfin
+        ghcr:andreuinyu/multiregistry-exporter
+        dockerhub:andreuinyu/multiregistry-exporter
         dockerhub:nginx
         <registry>:<owner>/<image>
 ```
