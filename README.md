@@ -1,4 +1,6 @@
 # multiregistry-exporter
+[![Docker Pulls](https://badgen.net/docker/pulls/andreuinyu/multiregistry-exporter?icon=docker&label=pulls)](https://hub.docker.com/r/andreuinyu/multiregistry-exporter/)
+[![Docker Image Size](https://badgen.net/docker/size/andreuinyu/multiregistry-exporter?icon=docker&label=image%20size)](https://hub.docker.com/r/andreuinyu/multiregistry-exporter/)
 
 Prometheus exporter for container image stats from GHCR and Docker Hub, heavily inspired by [d0ugal's ghcr-exporter](https://github.com/d0ugal/ghcr-exporter) and [promhippie's dockerhub-exporter](https://github.com/promhippie/dockerhub_exporter).
 
