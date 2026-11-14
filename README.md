@@ -4,8 +4,8 @@
 
 Prometheus exporter for container image stats from GHCR and Docker Hub, heavily inspired by [d0ugal's ghcr-exporter](https://github.com/d0ugal/ghcr-exporter) and [promhippie's dockerhub-exporter](https://github.com/promhippie/dockerhub_exporter).
 
-The user list images as `registry:owner/image` and it serves pull counts, size and last-updated
-time on `/metrics`. Python standard library only.
+Users list images as `registry:owner/image`; the Rust exporter serves pull counts, size and
+last-updated time on `/metrics`.
 
 ## Configuration
 

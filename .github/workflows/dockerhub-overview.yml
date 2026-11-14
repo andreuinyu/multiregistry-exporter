@@ -7,7 +7,10 @@ on:
       - README.md
       - .github/workflows/dockerhub-overview.yml
   workflow_dispatch: 
- 
+
+permissions:
+  contents: read
+
 jobs:
   dockerHubDescription:
     runs-on: ubuntu-latest
