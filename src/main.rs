@@ -7,14 +7,28 @@ mod web;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::{Context, bail};
-use axum::serve;
+use axum::{Router, body::Body};
 use config::Config;
+use hyper::{Request, body::Incoming};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo, TokioTimer},
+    server::conn::auto::Builder,
+    service::TowerToHyperService,
+};
 use registry::HttpClient;
 use state::{CollectorState, poll_loop};
-use tokio::net::TcpListener;
-use tracing::{info, warn};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::Semaphore,
+};
+use tower::ServiceExt;
+use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 use web::{AppContext, router};
+
+const MAX_ACTIVE_CONNECTIONS: usize = 128;
+const MAX_HTTP2_STREAMS_PER_CONNECTION: u32 = 32;
+const REQUEST_HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,12 +60,54 @@ async fn main() -> anyhow::Result<()> {
         "starting multiregistry-exporter"
     );
 
-    if let Err(error) = serve(listener, router(AppContext { config, state })).await {
-        warn!(%error, "HTTP server stopped");
-        return Err(error.into());
-    }
+    serve_http(listener, router(AppContext { config, state })).await
+}
 
-    Ok(())
+async fn serve_http(listener: TcpListener, app: Router) -> anyhow::Result<()> {
+    let active_connections = Arc::new(Semaphore::new(MAX_ACTIVE_CONNECTIONS));
+
+    loop {
+        let permit = Arc::clone(&active_connections)
+            .acquire_owned()
+            .await
+            .context("HTTP connection limit semaphore closed")?;
+        let (stream, remote_addr) = listener
+            .accept()
+            .await
+            .context("failed to accept HTTP connection")?;
+        let app = app.clone();
+
+        tokio::spawn(async move {
+            let _permit = permit;
+            serve_connection(stream, app, remote_addr, REQUEST_HEADER_TIMEOUT).await;
+        });
+    }
+}
+
+async fn serve_connection(
+    stream: TcpStream,
+    app: Router,
+    remote_addr: SocketAddr,
+    header_timeout: Duration,
+) {
+    let io = TokioIo::new(stream);
+    let app = app.map_request(|request: Request<Incoming>| request.map(Body::new));
+    let service = TowerToHyperService::new(app);
+    let mut builder = Builder::new(TokioExecutor::new());
+    builder
+        .http1()
+        .timer(TokioTimer::new())
+        .header_read_timeout(header_timeout)
+        .max_headers(64)
+        .max_buf_size(16 * 1024)
+        .keep_alive(false);
+    builder
+        .http2()
+        .max_concurrent_streams(MAX_HTTP2_STREAMS_PER_CONNECTION);
+
+    if let Err(error) = builder.serve_connection(io, service).await {
+        debug!(%remote_addr, %error, "HTTP connection closed");
+    }
 }
 
 async fn healthcheck() -> anyhow::Result<()> {
@@ -75,4 +131,55 @@ async fn healthcheck() -> anyhow::Result<()> {
         bail!("health endpoint returned {}", response.status());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use axum::{Router, routing::get};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+        time::timeout,
+    };
+
+    use super::serve_connection;
+
+    #[tokio::test]
+    async fn serves_requests_and_closes_connections_with_incomplete_headers() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new().route("/", get(|| async { "ok" }));
+        let server = tokio::spawn(async move {
+            let (stream, remote_addr) = listener.accept().await.unwrap();
+            serve_connection(stream, app.clone(), remote_addr, Duration::from_millis(50)).await;
+            let (stream, remote_addr) = listener.accept().await.unwrap();
+            serve_connection(stream, app, remote_addr, Duration::from_millis(50)).await;
+        });
+
+        let mut client = TcpStream::connect(address).await.unwrap();
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        timeout(Duration::from_secs(1), client.read_to_end(&mut response))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 200 OK"));
+        assert!(response.ends_with(b"ok"));
+
+        let mut client = TcpStream::connect(address).await.unwrap();
+        client.write_all(b"GET / HTTP/1.1\r\nHost:").await.unwrap();
+
+        let mut response = Vec::new();
+        timeout(Duration::from_secs(1), client.read_to_end(&mut response))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(response.is_empty());
+        server.await.unwrap();
+    }
 }

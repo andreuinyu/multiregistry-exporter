@@ -22,6 +22,9 @@ use crate::{
 pub type Metrics = HashMap<String, f64>;
 
 const MANIFEST_ACCEPT: &str = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json";
+const GHCR_VERSION_PAGE_SIZE: usize = 100;
+const MAX_GHCR_VERSION_PAGES: usize = 100;
+const GHCR_VERSION_COUNT_BUDGET: Duration = Duration::from_secs(30);
 
 static DOWNLOADS_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"Total downloads</span>\s*<h3[^>]*title="(\d+)""#)
@@ -315,6 +318,42 @@ async fn ghcr_version_count(
     image: &Image,
     token: &str,
 ) -> Result<usize> {
+    ghcr_version_count_with_limits(
+        http,
+        config,
+        image,
+        token,
+        MAX_GHCR_VERSION_PAGES,
+        GHCR_VERSION_COUNT_BUDGET,
+    )
+    .await
+}
+
+async fn ghcr_version_count_with_limits(
+    http: &HttpClient,
+    config: &Config,
+    image: &Image,
+    token: &str,
+    max_pages: usize,
+    time_budget: Duration,
+) -> Result<usize> {
+    tokio::time::timeout(
+        time_budget,
+        ghcr_version_count_pages(http, config, image, token, max_pages),
+    )
+    .await
+    .with_context(|| {
+        format!("GHCR package version count exceeded its {time_budget:?} time budget")
+    })?
+}
+
+async fn ghcr_version_count_pages(
+    http: &HttpClient,
+    config: &Config,
+    image: &Image,
+    token: &str,
+    max_pages: usize,
+) -> Result<usize> {
     let mut headers = HeaderMap::new();
     headers.insert(
         ACCEPT,
@@ -331,8 +370,7 @@ async fn ghcr_version_count(
 
     for kind in ["orgs", "users"] {
         let mut total = 0;
-        let mut page = 1;
-        loop {
+        for page in 1..=max_pages {
             let url = append_path(
                 &config.github_api,
                 &[
@@ -346,7 +384,7 @@ async fn ghcr_version_count(
             )?;
             let mut url = url;
             url.query_pairs_mut()
-                .append_pair("per_page", "100")
+                .append_pair("per_page", &GHCR_VERSION_PAGE_SIZE.to_string())
                 .append_pair("page", &page.to_string());
 
             let response = http.get(&url, &headers).await?;
@@ -361,10 +399,14 @@ async fn ghcr_version_count(
                 .await
                 .with_context(|| format!("failed to decode package versions from {url}"))?;
             total += batch.len();
-            if batch.len() < 100 {
+            if batch.len() < GHCR_VERSION_PAGE_SIZE {
                 return Ok(total);
             }
-            page += 1;
+            if page == max_pages {
+                bail!(
+                    "GHCR package version count for {image} exceeded the maximum of {max_pages} pages"
+                );
+            }
         }
     }
 
@@ -479,13 +521,21 @@ struct ManifestSize {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::Duration,
+    };
 
     use axum::{
         Json, Router,
         body::Body,
+        extract::State,
         http::{HeaderMap, StatusCode, Uri},
         response::{IntoResponse, Response},
+        routing::get,
     };
     use reqwest::Url;
     use serde_json::json;
@@ -497,7 +547,8 @@ mod tests {
     };
 
     use super::{
-        HttpClient, append_path, fetch_dockerhub, fetch_ghcr, iso_to_epoch, platform_parts,
+        HttpClient, append_path, fetch_dockerhub, fetch_ghcr, ghcr_version_count_with_limits,
+        iso_to_epoch, platform_parts,
     };
 
     #[test]
@@ -573,6 +624,81 @@ mod tests {
         server.abort();
     }
 
+    #[tokio::test]
+    async fn ghcr_version_count_stops_at_page_limit() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let server_requests = Arc::clone(&requests);
+        let server = tokio::spawn(async move {
+            let app = Router::new()
+                .route(
+                    "/orgs/owner/packages/container/image/versions",
+                    get(full_version_page),
+                )
+                .with_state(server_requests);
+            axum::serve(listener, app).await.unwrap();
+        });
+        let base = Url::parse(&format!("http://{address}")).unwrap();
+        let config = test_config(&base);
+        let image = Image {
+            registry: Registry::Ghcr,
+            owner: "owner".into(),
+            name: "image".into(),
+        };
+        let http = HttpClient::new("test").unwrap();
+
+        let error = ghcr_version_count_with_limits(
+            &http,
+            &config,
+            &image,
+            "api-token",
+            2,
+            Duration::from_secs(2),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("maximum of 2 pages"));
+        assert_eq!(requests.load(Ordering::Relaxed), 2);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn ghcr_version_count_obeys_overall_time_budget() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let app = Router::new().route(
+                "/orgs/owner/packages/container/image/versions",
+                get(slow_version_page),
+            );
+            axum::serve(listener, app).await.unwrap();
+        });
+        let base = Url::parse(&format!("http://{address}")).unwrap();
+        let config = test_config(&base);
+        let image = Image {
+            registry: Registry::Ghcr,
+            owner: "owner".into(),
+            name: "image".into(),
+        };
+        let http = HttpClient::new("test").unwrap();
+
+        let error = ghcr_version_count_with_limits(
+            &http,
+            &config,
+            &image,
+            "api-token",
+            2,
+            Duration::from_millis(50),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("time budget"));
+        server.abort();
+    }
+
     fn test_config(base: &Url) -> Config {
         Config {
             images: Vec::new(),
@@ -590,6 +716,18 @@ mod tests {
             dockerhub_user: None,
             dockerhub_token: None,
         }
+    }
+
+    async fn full_version_page(
+        State(requests): State<Arc<AtomicUsize>>,
+    ) -> Json<Vec<serde_json::Value>> {
+        requests.fetch_add(1, Ordering::Relaxed);
+        Json((0..100).map(|id| json!({"id": id})).collect())
+    }
+
+    async fn slow_version_page() -> Json<Vec<serde_json::Value>> {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        Json(Vec::new())
     }
 
     async fn mock_dockerhub(uri: Uri, headers: HeaderMap) -> Response<Body> {
