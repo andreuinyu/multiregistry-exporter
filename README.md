@@ -41,8 +41,7 @@ Registries: `ghcr` (alias `ghcr.io`) and `dockerhub` (aliases `docker`, `hub`, `
 ### Without a published port
 
 If Prometheus is on the same Docker network, it can reach the container by name and nothing
-needs to be published. This example joins an existing network called `monitoring`
-(the one Prometheus is attached to):
+needs to be published. 
 
 ```yaml
 services:
