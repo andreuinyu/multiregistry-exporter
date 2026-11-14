@@ -1,6 +1,6 @@
 services:
   multiregistry-exporter:
-    container_name: multiregistry-exporter
+    container_name: multiregistry-exporter-dev
     build: .
     restart: unless-stopped
     ports:
@@ -12,6 +12,7 @@ services:
         dockerhub:jellyfin/jellyfin
         dockerhub:nginx
       INTERVAL: "1800"          # seconds between registry polls
+      LOG_LEVEL: "DEBUG"         # DEBUG, INFO, WARNING, ERROR
       # GITHUB_TOKEN: ghp_xxx   # optional: adds ghcr version counts
       # DOCKERHUB_USER: me      # optional: higher Docker Hub rate limits (both needed)
       # DOCKERHUB_TOKEN: xxx    # optional: higher Docker Hub rate limits (both needed)

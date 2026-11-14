@@ -101,9 +101,21 @@ def parse_specs(text):
 # HTTP helper
 # --------------------------------------------------------------------------- #
 def http_get(url, headers=None, timeout=20):
-    req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode("utf-8", "replace")
+    start = time.perf_counter()
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": UA, **(headers or {})}
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace")
+    finally:
+        elapsed = time.perf_counter() - start
+        log.debug(
+            "HTTP GET for %s completed in %.4fs",
+            url,
+            elapsed
+        )
 
 
 def iso_to_epoch(s):
@@ -258,26 +270,28 @@ class State:
 
     def poll_once(self):
         for img in self.images:
-            t0 = time.time()
+            t0 = time.perf_counter()
             try:
                 metrics = FETCHERS[img.registry](img)
                 res = {"metrics": metrics, "up": 1, "error": ""}
-                log.info("%s ok: %s", img, metrics.get("registry_image_pull_count"))
             except Exception as e:
                 res = {"up": 0, "error": str(e)}
                 log.warning("%s failed: %s", img, e)
-            res["ts"], res["duration"] = time.time(), time.time() - t0
+            res["ts"], res["duration"] = time.time(), time.perf_counter() - t0
             with self.lock:
                 old = self.data.get(img.key, {})
                 # keep last good values around if this poll failed
                 res["metrics"] = res.get("metrics") or old.get("metrics", {})
                 self.data[img.key] = res
-            time.sleep(0.5)  # be polite between requests
-
+                log.debug(
+                    "Poll completed in %.4fs",
+                    res["duration"]
+                )
     def loop(self, interval):
         while True:
             self.poll_once()
             time.sleep(interval)
+            log.info("Next poll in %ds", interval)
 
 
 HELP = {
@@ -302,6 +316,7 @@ def labels(img):
 
 
 def render_metrics(state):
+    start = time.perf_counter()
     with state.lock:
         data = dict(state.data)
     rows = {k: [] for k in HELP}
@@ -326,6 +341,10 @@ def render_metrics(state):
             continue
         help_, typ = HELP.get(name, (name, "gauge"))
         out += ["", "# HELP %s %s" % (name, help_), "# TYPE %s %s" % (name, typ)] + lines
+    elapsed = time.perf_counter() - start
+    log.debug(
+        "Metrics rendered in %.4fs",
+        elapsed)
     return "\n".join(out) + "\n"
 
 
