@@ -1,7 +1,10 @@
 # multiregistry-exporter
-[![Docker Pulls](https://badgen.net/docker/pulls/andreuinyu/multiregistry-exporter?icon=docker&label=pulls)](https://hub.docker.com/r/andreuinyu/multiregistry-exporter/)
-[![Docker Image Size](https://badgen.net/docker/size/andreuinyu/multiregistry-exporter?icon=docker&label=image%20size)](https://hub.docker.com/r/andreuinyu/multiregistry-exporter/)
+[![Docker](https://img.shields.io/badge/docker-andreuinyu%2Fmultiregistry--exporter-2496ED?style=flat&logo=docker&logoColor=white)](https://hub.docker.com/r/andreuinyu/multiregistry-exporter)
+[![Pulls](https://badgen.net/docker/pulls/andreuinyu/multiregistry-exporter?icon=docker&label=pulls)](https://hub.docker.com/r/andreuinyu/multiregistry-exporter/)
+[![Image Size](https://badgen.net/docker/size/andreuinyu/multiregistry-exporter?icon=docker&label=image%20size)](https://hub.docker.com/r/andreuinyu/multiregistry-exporter/)
+![Architecture](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-orange?style=flat)
 [![CodeQL](https://github.com/andreuinyu/multiregistry-exporter/actions/workflows/codeql.yml/badge.svg)](https://github.com/andreuinyu/multiregistry-exporter/actions/workflows/codeql.yml)
+[![Latest Release](https://img.shields.io/github/v/release/andreuinyu/multiregistry-exporter?style=flat&label=release&color=blueviolet)](https://github.com/andreuinyu/multiregistry-exporter/releases/latest)
 
 Prometheus exporter for container image stats from GHCR and Docker Hub, heavily inspired by [d0ugal's ghcr-exporter](https://github.com/d0ugal/ghcr-exporter) and [promhippie's dockerhub-exporter](https://github.com/promhippie/dockerhub_exporter).
 
